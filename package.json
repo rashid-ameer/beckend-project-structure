@@ -1,0 +1,21 @@
+{
+  "name": "beckend-project-structure",
+  "version": "1.0.0",
+  "description": "A file and folder structure template for creating beckend projects",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "nodemon src/index.js"
+  },
+  "keywords": [
+    "beckend",
+    "javascript",
+    "node"
+  ],
+  "author": "Rashid Ameer",
+  "license": "ISC",
+  "devDependencies": {
+    "nodemon": "^3.1.4",
+    "prettier": "^3.3.3"
+  }
+}
