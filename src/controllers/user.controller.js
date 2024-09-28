@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import { User } from "../models/user.models.js";
 import ApiError from "../utils/api-error.js";
 import { ApiResponse } from "../utils/api-response.js";
@@ -203,4 +204,304 @@ const refreshAccessToken = asyncHanlder(async (req, res) => {
     );
 });
 
-export { registerUser, loginUser, logoutUser, refreshAccessToken };
+const updatePassword = asyncHanlder(async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+
+  if (!currentPassword || !newPassword) {
+    throw new ApiError(400, "Missing required fields");
+  }
+
+  // get the cookies
+  const accessToken = req.cookies.accessToken;
+
+  if (!accessToken) {
+    throw new ApiError(401, "Unauthorized request");
+  }
+
+  // decode the access token
+  const decodedToken = jwt.verify(accessToken, process.env.ACCESS_TOKEN_SECRET);
+
+  // find the user
+  const user = await User.findById(decodedToken._id);
+  if (!user) {
+    throw new ApiError(404, "User not found");
+  }
+
+  // check if the current password is correct
+  const isValidPassword = await user.isPasswordMatch(currentPassword);
+
+  if (!isValidPassword) {
+    throw new ApiError(401, "Invalid credentials");
+  }
+
+  // update the password
+  user.password = newPassword;
+  await user.save({ validateBeforeSave: false });
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, null, "Password updated successfully"));
+});
+
+const getCurrentUser = asyncHanlder(async (req, res) => {
+  // get access token
+  const accessToken =
+    req.cookies.accessToken || req.headers.authorization?.split(" ")[1];
+
+  if (!accessToken) {
+    throw new ApiError(401, "Unauthorized request");
+  }
+
+  // decode the access token
+  const decodedToken = jwt.verify(accessToken, process.env.ACCESS_TOKEN_SECRET);
+
+  // find the user
+  const user = await User.findById(decodedToken._id);
+
+  if (!user) {
+    throw new ApiError(404, "User not found");
+  }
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, user, "User details fetched successfully"));
+});
+
+const updateAvatar = asyncHanlder(async (req, res) => {
+  // get access token
+  const accessToken =
+    req.cookies.accessToken || req.headers.authorization?.split(" ")[1];
+
+  if (!accessToken) {
+    throw new ApiError(401, "Unauthorized request");
+  }
+
+  const avatarLocalPath = req.file?.path;
+  if (!avatarLocalPath) {
+    throw new ApiError(400, "Avatar is required");
+  }
+
+  // upload avatar to cloudinary
+  const avatar = await uploadOnCloudinary(avatarLocalPath);
+
+  if (!avatar.url) {
+    throw new ApiError(500, "Error uploading avatar");
+  }
+
+  // decode the access token
+  const decodedToken = jwt.verify(accessToken, process.env.ACCESS_TOKEN_SECRET);
+
+  // find the user
+  const user = await User.findById(decodedToken._id);
+  if (!user) {
+    throw new ApiError(404, "User not found");
+  }
+
+  user.avatar = avatar.url;
+  await user.save({ validateBeforeSave: false });
+
+  const userDto = {
+    _id: user._id,
+    username: user.username,
+    email: user.email,
+    fullName: user.fullName,
+    avatar: user.avatar,
+    coverImage: user.coverImage,
+    watchHistory: user.watchHistory,
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
+  };
+
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(200, { user: userDto }, "Avatar updated successfully"),
+    );
+});
+
+const updateCover = asyncHanlder(async (req, res) => {
+  // get access token
+  const accessToken =
+    req.cookies.accessToken || req.headers.authorization?.split(" ")[1];
+
+  if (!accessToken) {
+    throw new ApiError(401, "Unauthorized request");
+  }
+
+  const coverLocalPath = req.file?.path;
+  if (!avatarLocalPath) {
+    throw new ApiError(400, "Avatar is required");
+  }
+
+  // upload avatar to cloudinary
+  const coverImage = await uploadOnCloudinary(coverLocalPath);
+
+  if (!coverImage.url) {
+    throw new ApiError(500, "Error uploading avatar");
+  }
+
+  // decode the access token
+  const decodedToken = jwt.verify(accessToken, process.env.ACCESS_TOKEN_SECRET);
+
+  // find the user
+  const user = await User.findById(decodedToken._id);
+  if (!user) {
+    throw new ApiError(404, "User not found");
+  }
+
+  user.coverImage = coverImage.url;
+  await user.save({ validateBeforeSave: false });
+
+  const userDto = {
+    _id: user._id,
+    username: user.username,
+    email: user.email,
+    fullName: user.fullName,
+    avatar: user.avatar,
+    coverImage: user.coverImage,
+    watchHistory: user.watchHistory,
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
+  };
+
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(
+        200,
+        { user: userDto },
+        "Cover Image updated successfully",
+      ),
+    );
+});
+
+const getUserChannelProfile = asyncHanlder(async (req, res) => {
+  const { username } = req.params;
+
+  if (!username || !username.trim()) {
+    throw new ApiError(400, "Username is missing");
+  }
+
+  const result = await User.aggregate([
+    {
+      $match: { username: username.toLowerCase() },
+    },
+    {
+      $lookup: {
+        from: "subscriptions",
+        localField: "_id",
+        foreignField: "channel",
+        as: "subscribers",
+      },
+    },
+    {
+      $lookup: {
+        from: "subscriptions",
+        localField: "_id",
+        foreignField: "subscriber",
+        as: "subscribed",
+      },
+    },
+    {
+      $addFields: {
+        subscribersCount: {
+          $size: "$subscribers",
+        },
+        subscribedCount: {
+          $size: "$subscribed",
+        },
+        isSubscribed: {
+          $cond: {
+            if: {
+              $in: [req.user._id, "$subscribers.subscriber"],
+            },
+            then: true,
+            else: false,
+          },
+        },
+      },
+    },
+    {
+      $project: {
+        fullName: 1,
+        username: 1,
+        email: 1,
+        subscribedCount: 1,
+        subscribersCount: 1,
+        avatar: 1,
+        coverImage: 1,
+      },
+    },
+  ]);
+
+  if (!result.length) {
+    throw new ApiError(404, "Channel does not exists");
+  }
+
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(200, result[0], "Channel profile fetched successfully"),
+    );
+});
+
+const getWatchHistory = asyncHanlder(async (req, res) => {
+  const result = await User.aggregate([
+    {
+      $match: {
+        _id: mongoose.Types.ObjectId(req.user._id),
+      },
+    },
+    {
+      $lookup: {
+        from: "videos",
+        localField: "watchHistory",
+        foreignField: "_id",
+        as: "watchHistory",
+
+        pipeline: [
+          {
+            $lookup: {
+              from: "users",
+              foreignField: "_id",
+              localField: "owner",
+              as: "owner",
+              pipeline: [
+                {
+                  $project: {
+                    fullName: 1,
+                    username: 1,
+                    avatar: 1,
+                  },
+                },
+              ],
+            },
+          },
+          {
+            $addFields: {
+              $first: "owner",
+            },
+          },
+        ],
+      },
+    },
+  ]);
+
+  return res.json(
+    new ApiResponse(
+      200,
+      { watchHistory: result[0].watchHistory },
+      "Watch history fetched successfully",
+    ),
+  );
+});
+
+export {
+  registerUser,
+  loginUser,
+  logoutUser,
+  refreshAccessToken,
+  updatePassword,
+  updateAvatar,
+  updateCover,
+};
